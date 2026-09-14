@@ -1,0 +1,10 @@
+# Local credentials: keep actual secrets out of source control.
+.env
+.env.*
+!.env.example
+
+# Future app dependencies and generated output.
+node_modules/
+dist/
+coverage/
+*.log
