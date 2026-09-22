@@ -1,0 +1,38 @@
+{
+  "checkedAt": "2026-09-22T21:49:14.427Z",
+  "keyConfigured": true,
+  "maxRequests": 2,
+  "attemptedRequests": 2,
+  "results": [
+    {
+      "label": "stock_list",
+      "endpoint": "stock-list",
+      "parameters": {},
+      "httpStatus": 402,
+      "outcome": "access_denied"
+    },
+    {
+      "label": "profile_bulk_first_part",
+      "endpoint": "profile-bulk",
+      "parameters": {
+        "part": 0
+      },
+      "httpStatus": 402,
+      "outcome": "access_denied"
+    }
+  ],
+  "assumptions": {
+    "marketCapMoreThan": 10000000000,
+    "country": "US",
+    "from": "2026-08-24",
+    "to": "2026-09-21"
+  },
+  "limitations": [
+    "Sample only; does not establish the complete supported-symbol set.",
+    "Request count is local attempts, not verified vendor billing or remaining quota.",
+    "Screen completeness and pagination must be verified separately.",
+    "Price adjustment and industry weighting/period methodology remain unverified.",
+    "Prior weekday may be a holiday; empty data does not prove lack of access."
+  ],
+  "stoppedEarly": false
+}

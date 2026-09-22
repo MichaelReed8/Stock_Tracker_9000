@@ -1,6 +1,16 @@
 # Stock Tracker 9000 — project handoff
 
-Last updated: September 14, 2026.
+Last updated: September 22, 2026.
+
+## Latest provider decision
+
+After the FMP screener returned HTTP 402, the user chose to proceed with Alpaca for US symbols and historical prices while retaining FMP profiles for market cap/industry classification and FMP for industry performance. This supersedes the earlier FMP-only implementation direction below. Alpaca credentials were tested successfully on September 22: the active US asset list contained 14,357 entries and AAPL/MSFT split-adjusted SIP historical prices were retrieved. FMP profiles for AAPL, MSFT, SOUN, and RIOT returned market cap, industry, and asset flags. FMP stock-list and profile-bulk returned HTTP 402. FMP profile access and classification have been verified for only those four symbols. See [ALPACA_SETUP.md](ALPACA_SETUP.md) and [FMP_CAPABILITY_REPORT.md](FMP_CAPABILITY_REPORT.md).
+
+A full Alpaca price coverage scan was subsequently completed for September 18 and 21, 2026: 144/144 batches succeeded, 144 Alpaca requests were made, and 13,244 of 14,357 active US asset entries had prices on both dates. This establishes usable price coverage for that interval, not company classification or market-cap qualification. No FMP requests were used in the full price scan. The resumable implementation and report are documented in [ALPACA_SETUP.md](ALPACA_SETUP.md).
+
+On September 22, the user selected FMP again for both individual stocks and industries after considering Alpha Vantage and a two-provider approach. Proceed with FMP Free: use the stock screener to identify qualifying companies, retrieve price histories for the supported qualifying symbols, then calculate and rank period returns locally. Alpha Vantage is not part of the selected implementation.
+
+The user reaffirmed the 250-call daily budget as the starting assumption. Reserve calls for screening, industry data, metadata refreshes, and retries before determining stock scan capacity. Endpoint access and supported symbols still require an authenticated capability probe; 250 calls does not guarantee access to every screened symbol. If the complete qualifying set exceeds access or request limits, report that limitation explicitly rather than silently truncating the rankings.
 
 ## Product intent
 
@@ -18,10 +28,10 @@ The original Copilot product discussion and implementation plan were reviewed wi
 | Delivery | Progressive Web App (PWA) added to the iPhone Home Screen. |
 | Development machine | Windows; no Mac available. |
 | Apple membership | Avoid a paid Apple Developer account by using Web Push. No TestFlight required for this approach. |
-| Data vendor | Financial Modeling Prep (FMP). Start on Free; allow a later tier upgrade. |
+| Data vendors | Alpaca for US assets/prices; FMP Free individual profiles for market cap/classification and FMP industry data. |
 | Freshness | End-of-day data is acceptable for the initial version. Live data remains a future preference if affordable. |
 | Budget | Ideally around $20/month maximum; minimize costs. User would consider more if live data warrants it. Currency and whether this includes all infrastructure costs were not specified. |
-| Initial stock coverage | Supported US individual stocks only, limited by Free historical-price access. |
+| Initial stock coverage | Supported US individual stocks with Alpaca price coverage and usable FMP profiles. |
 | Future coverage | Configurable US, Canadian, or combined coverage, including ETFs once supported. |
 | ETFs | Explicitly deferred because the selected Free access does not include them. |
 | Frequencies | Daily, weekly, biweekly, and monthly, with a user-configurable delivery time. |
@@ -73,7 +83,7 @@ References:
 
 ## FMP access: latest user-provided understanding
 
-Treat these as the user's documentation/account findings. No authenticated endpoint tests have been performed yet.
+The bullets below preserve the user's earlier documentation/account findings. Authenticated tests on September 22 now supersede the screener-access assumption: all three tested screener requests returned HTTP 402, including a request with only `limit=10`. AAPL profile, AAPL/MSFT light price histories, industry snapshot, and Biotechnology industry history succeeded. See [FMP_CAPABILITY_REPORT.md](FMP_CAPABILITY_REPORT.md) and the sanitized JSON reports. The exact cause of the screener restriction and broader symbol coverage remain unverified.
 
 - Free allows 250 API calls/day and initial use of end-of-day data.
 - Stock Screener: available filters are usable except the exchange filter/access option, according to the user's latest clarification. Do not discard the screener based on earlier uncertainty.
@@ -90,7 +100,9 @@ FMP pricing changed or differed between fetched pages during the discussion. Do 
 
 ## Individual-stock approach
 
-Use Stock Screener → intersect with Basic Stock Chart's supported symbols → retrieve closing-price histories → calculate returns → sort gainers and losers → save alert snapshot.
+Current approach: Alpaca asset list → split-adjusted SIP daily bars → calculate period returns → exclude explicitly described warrants/rights → inspect/cache FMP profiles in return order → apply market-cap, company/fund and industry criteria → save a summary only if the ranking completes. The paid FMP screener is not used. The older FMP endpoint table below is historical context for the initial provider evaluation.
+
+The first cached ranking diagnostic used a $10B threshold and five results per direction (test settings). It made 50 new FMP requests across two attempts, cached 49 successful profiles, and stopped during the gainers pass before reaching qualifying results or checking losers. After excluding 602 explicitly described warrants/rights, 12,642 priced candidates remained. The per-run request limit triggered the expected incomplete result; this was not vendor quota exhaustion. See `data/ranking-report.json` and [ALPACA_SETUP.md](ALPACA_SETUP.md). Continue building on the cache instead of downloading Alpaca prices again for this interval.
 
 Minimum market cap is a qualification filter. Rank the qualified stocks by percentage return, not by market cap. Filtering an already truncated global gainers/losers leaderboard can miss qualifying companies outside that leaderboard.
 
@@ -191,7 +203,7 @@ Examples from the user's original idea: a new product announcement with a price 
 
 ## Local API key setup
 
-The root `.env.local` file has been created with a blank entry:
+The root `.env.local` file was initially created with this blank entry; the user subsequently entered a key locally, and the backend probe confirmed configuration presence without exposing its value:
 
 ```dotenv
 FMP_API_KEY=
@@ -203,20 +215,20 @@ The user should open `.env.local` manually in the editor, paste the key immediat
 
 Git ignore and agent instructions do not create a technical filesystem access barrier. A readable local file could still be accessed by a process with permission. The intended protection here is keeping the key out of code/Git/model context and honoring explicit agent instructions; an enforced denial would require a separate permissions or secret-management setup.
 
-No backend exists yet, so environment loading still needs implementation. Do not use a frontend-public variable such as `VITE_FMP_API_KEY`, `NEXT_PUBLIC_FMP_API_KEY`, or `EXPO_PUBLIC_FMP_API_KEY`.
+The dependency-free Node diagnostic in `scripts/fmp-probe.mjs` implements backend-only environment loading. The application backend is not yet built. Do not use a frontend-public variable such as `VITE_FMP_API_KEY`, `NEXT_PUBLIC_FMP_API_KEY`, or `EXPO_PUBLIC_FMP_API_KEY`.
 
 ## State at handoff and next steps
 
-The repository originally contained only a project-name README. No application, database, authenticated API probe, market scan, or push integration has been implemented. This handoff and local configuration placeholders are the first project additions. No credentials have been supplied.
+The repository now includes a TypeScript backend foundation, a local SQLite cache, Alpaca and FMP clients, a resumable full price scan, and a bounded cached-ranking diagnostic. No PWA, scheduled jobs, saved notification snapshots, or Web Push integration exists yet. Current validation: 15 offline tests and TypeScript checks pass.
 
 Next session:
 
-1. Read this handoff and AGENTS.md. Preserve the accepted PWA/FMP Free direction and latest user corrections.
-2. After the user enters the key locally, implement a sanitized backend-only capability probe. Inspect response fields/status without exposing credentials.
-3. Establish Basic Stock Chart's exact supported-symbol set, usable screener fields, profile fields, history availability/adjustments, industry methodology, and scan request budget.
+1. Read this handoff and AGENTS.md. Preserve the accepted PWA/Alpaca/FMP direction and latest user corrections.
+2. Continue bounded profile enrichment using cached price rankings. Confirm the desired market-cap threshold and country/listing interpretation before product defaults are finalized.
+3. Implement frequency-aware period selection using trading sessions; confirm industry methodology and request budget. Manual September 18/21 dates were only a daily coverage test.
 4. Choose lightweight hosting/database options and resolve any period/calculation details needed for a concrete implementation.
 5. Scaffold the TypeScript PWA/backend, preferences and alert storage, then implement stock and industry summaries.
 6. Add shared scheduling, the two Web Push notification types, and links to saved results. Validate on the user's iPhone.
 7. Add polish/history and, later, ETF/Canadian/live data and AI as supported and desired.
 
-The user stopped for the day and requested this written handoff and a place to enter the API key. Resume from here rather than repeating the product-discovery conversation.
+Resume from the authenticated findings rather than repeating product discovery or assuming the screener is available.

@@ -1,0 +1,23 @@
+{
+  "name": "stock-tracker-9000",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "alpaca:probe": "tsx src/alpaca-probe.ts",
+    "price:scan": "tsx src/price-scan.ts",
+    "ranking:check": "tsx src/ranking-check.ts",
+    "profiles:seed": "tsx src/profile-seed.ts",
+    "profiles:fill": "tsx src/profiles-fill.ts",
+    "test": "node --test scripts/fmp-probe.test.mjs && tsx --test src/alpaca.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "sql.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/sql.js": "^1.4.9",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

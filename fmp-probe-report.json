@@ -1,0 +1,163 @@
+{
+  "checkedAt": "2026-09-22T21:40:52.231Z",
+  "keyConfigured": true,
+  "maxRequests": 8,
+  "attemptedRequests": 6,
+  "results": [
+    {
+      "label": "market_cap_screen",
+      "endpoint": "company-screener",
+      "parameters": {
+        "marketCapMoreThan": 10000000000,
+        "country": "US",
+        "isEtf": false,
+        "isFund": false,
+        "isActivelyTrading": true,
+        "limit": 1000
+      },
+      "httpStatus": 402,
+      "outcome": "access_denied"
+    },
+    {
+      "label": "company_profile",
+      "endpoint": "profile",
+      "parameters": {
+        "symbol": "AAPL"
+      },
+      "httpStatus": 200,
+      "outcome": "data_received",
+      "summary": {
+        "rowCount": 1,
+        "fieldsPresent": [
+          "symbol",
+          "companyName",
+          "marketCap",
+          "sector",
+          "industry",
+          "country",
+          "exchange",
+          "isEtf",
+          "isFund",
+          "isActivelyTrading",
+          "price",
+          "volume"
+        ],
+        "numericPriceRows": 1,
+        "numericMarketCapRows": 1,
+        "numericAverageChangeRows": 0
+      }
+    },
+    {
+      "label": "price_history_AAPL",
+      "endpoint": "historical-price-eod/light",
+      "parameters": {
+        "symbol": "AAPL",
+        "from": "2026-08-24",
+        "to": "2026-09-21"
+      },
+      "httpStatus": 200,
+      "outcome": "data_received",
+      "summary": {
+        "rowCount": 20,
+        "fieldsPresent": [
+          "symbol",
+          "date",
+          "price",
+          "volume"
+        ],
+        "firstDate": "2026-08-24",
+        "lastDate": "2026-09-21",
+        "numericPriceRows": 20,
+        "numericMarketCapRows": 0,
+        "numericAverageChangeRows": 0
+      }
+    },
+    {
+      "label": "price_history_MSFT",
+      "endpoint": "historical-price-eod/light",
+      "parameters": {
+        "symbol": "MSFT",
+        "from": "2026-08-24",
+        "to": "2026-09-21"
+      },
+      "httpStatus": 200,
+      "outcome": "data_received",
+      "summary": {
+        "rowCount": 20,
+        "fieldsPresent": [
+          "symbol",
+          "date",
+          "price",
+          "volume"
+        ],
+        "firstDate": "2026-08-24",
+        "lastDate": "2026-09-21",
+        "numericPriceRows": 20,
+        "numericMarketCapRows": 0,
+        "numericAverageChangeRows": 0
+      }
+    },
+    {
+      "label": "industry_snapshot",
+      "endpoint": "industry-performance-snapshot",
+      "parameters": {
+        "date": "2026-09-21"
+      },
+      "httpStatus": 200,
+      "outcome": "data_received",
+      "summary": {
+        "rowCount": 127,
+        "fieldsPresent": [
+          "industry",
+          "exchange",
+          "date",
+          "averageChange"
+        ],
+        "firstDate": "2026-09-21",
+        "lastDate": "2026-09-21",
+        "numericPriceRows": 0,
+        "numericMarketCapRows": 0,
+        "numericAverageChangeRows": 127
+      }
+    },
+    {
+      "label": "industry_history",
+      "endpoint": "historical-industry-performance",
+      "parameters": {
+        "industry": "Biotechnology",
+        "from": "2026-08-24",
+        "to": "2026-09-21"
+      },
+      "httpStatus": 200,
+      "outcome": "data_received",
+      "summary": {
+        "rowCount": 21,
+        "fieldsPresent": [
+          "industry",
+          "exchange",
+          "date",
+          "averageChange"
+        ],
+        "firstDate": "2026-08-24",
+        "lastDate": "2026-09-21",
+        "numericPriceRows": 0,
+        "numericMarketCapRows": 0,
+        "numericAverageChangeRows": 21
+      }
+    }
+  ],
+  "assumptions": {
+    "marketCapMoreThan": 10000000000,
+    "country": "US",
+    "from": "2026-08-24",
+    "to": "2026-09-21"
+  },
+  "limitations": [
+    "Sample only; does not establish the complete supported-symbol set.",
+    "Request count is local attempts, not verified vendor billing or remaining quota.",
+    "Screen completeness and pagination must be verified separately.",
+    "Price adjustment and industry weighting/period methodology remain unverified.",
+    "Prior weekday may be a holiday; empty data does not prove lack of access."
+  ],
+  "stoppedEarly": false
+}
