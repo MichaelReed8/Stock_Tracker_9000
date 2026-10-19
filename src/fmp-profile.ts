@@ -1,4 +1,5 @@
 import type { CacheDb, CompanyProfile } from './cache.js';
+import { profileIsUsable } from './profile-policy.js';
 
 const symbolPattern = /^[A-Z][A-Z0-9.-]{0,14}$/;
 const stringOrNull = (value: unknown): string | null => typeof value === 'string' && value.length ? value : null;
@@ -10,8 +11,7 @@ export type ProfileResult =
   | { status: 'unavailable'; reason?: 'missing_key' | 'invalid_symbol' | 'access_denied' | 'unauthorized' | 'forbidden' | 'rate_limited' | 'http_error' | 'api_error_payload' | 'invalid_payload' | 'request_failed' };
 
 export function profileIsFresh(profile: CompanyProfile | null, now = new Date()): boolean {
-  const age = profile ? now.getTime() - Date.parse(profile.fetchedAt) : NaN;
-  return age >= 0 && age < 7 * 86_400_000;
+  return profileIsUsable(profile, now);
 }
 
 export async function getCachedOrFetchProfile(
@@ -21,7 +21,7 @@ export async function getCachedOrFetchProfile(
 ): Promise<ProfileResult> {
   if (!symbolPattern.test(symbol)) return { status: 'unavailable', reason: 'invalid_symbol' };
   const cached = cache.getProfile(symbol);
-  // Cap is a moving value; refresh profiles that are older than seven days.
+  // Retain observations; the worker queues refresh at 90 days, reuse ends at 180.
   if (cached && profileIsFresh(cached, now)) {
     return { status: 'available', profile: cached };
   }
@@ -33,6 +33,15 @@ export async function getCachedOrFetchProfile(
     throw new Error('Daily profile limit must be between 0 and 250');
   }
   if (!await cache.reserveFmpRequest(utcDate, maxDailyAttempts)) return { status: 'budget_exhausted' };
+  const result = await fetchProfile(symbol, key, fetchImpl, now);
+  if (result.status === 'available') await cache.putProfile(result.profile);
+  return result;
+}
+
+export async function fetchProfile(symbol: string, key: string, fetchImpl: typeof fetch = fetch,
+  now = new Date()): Promise<ProfileResult> {
+  if (!symbolPattern.test(symbol)) return { status: 'unavailable', reason: 'invalid_symbol' };
+  if (!key) return { status: 'unavailable', reason: 'missing_key' };
   const url = new URL('https://financialmodelingprep.com/stable/profile');
   url.searchParams.set('symbol', symbol);
   url.searchParams.set('apikey', key);
@@ -59,7 +68,6 @@ export async function getCachedOrFetchProfile(
       country: stringOrNull(row.country), isEtf: booleanOrNull(row.isEtf),
       isFund: booleanOrNull(row.isFund),
     };
-    await cache.putProfile(profile);
     return { status: 'available', profile };
   } catch {
     // Never return raw HTTP or parse errors; FMP's query URL contains the key.

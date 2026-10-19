@@ -36,7 +36,8 @@ export async function rankCachedPrices(
   const result = await rankStocks(priced, bars, settings.startDate, settings.endDate,
     settings.minimumMarketCap, settings.countPerDirection, async symbol => {
       const now = new Date();
-      const cacheHit = profileIsFresh(cache.getProfile(symbol), now);
+      const cached = cache.getProfile(symbol);
+      const cacheHit = profileIsFresh(cached, now);
       if (!cacheHit && newRequests >= settings.maxNewRequests) {
         audit.push({ symbol, outcome: 'run_request_limit', cacheHit });
         return { status: 'budget_exhausted' };
@@ -62,7 +63,7 @@ export async function rankCachedPrices(
     });
   return {
     checkedAt: new Date().toISOString(), diagnostic: true, settings,
-    profileBasis: 'Latest cached profiles, up to seven days old; not historical market caps for the price dates.',
+    profileBasis: 'Dated profile observations under 180 days old; refresh queued at 90 days. Not historical market caps for the price dates.',
     assetCount: symbols.length, pricedCount: allPriced.length,
     candidateCount: priced.length, excludedKnownInstruments: allPriced.length - priced.length,
     excludedForMissingPrices: symbols.length - allPriced.length,

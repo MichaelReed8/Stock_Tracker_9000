@@ -1,16 +1,28 @@
 # Stock Tracker 9000 — project handoff
 
-Last updated: September 22, 2026.
+Last updated: October 19, 2026. September provider observations remain historical; an October 19 bounded profile/ranking check is recorded below.
+
+## October 19: serverless and cache policy update
+
+The user selected AWS serverless so collection runs without opening the editor or keeping a PC awake. A first deployable slice now includes an hourly EventBridge Scheduler profile worker, Lambda, DynamoDB persistence/atomic budgets/leases, Secrets Manager access, failure queue and alarms. The schedule defaults disabled and nothing is deployed yet. See [AWS_SETUP.md](AWS_SETUP.md) for setup, safe local-cache migration, activation, limitations and the remaining cloud price/summary work. AWS CLI 2.38.1 and SAM CLI 1.169.0 are installed, and SAM lint validation passed. Browser sign-in succeeded for profile `stock-tracker-9000` as root; configure a separate deployment identity before deployment.
+
+This supersedes the earlier seven-day hard profile expiry: queue proactive refresh at 90 days in the cloud worker; allow reuse under 180 days and retain older observations. Local ranking uses the same 180-day reuse limit, records profile observation dates, and still returns incomplete when necessary observations cannot be obtained. These are initial engineering settings; market caps near a filter cutoff may change sooner. Local and cloud counters are separate, so stop local provider jobs when cloud collection is enabled and account for activation-day usage. No provider calls or AWS deployment were made while implementing this slice.
+
+The next milestone is deploying automatic profile collection, then adding hosted price ingestion and usable summaries, rather than repeating small manual ranking diagnostics.
 
 ## Latest provider decision
 
-After the FMP screener returned HTTP 402, the user chose to proceed with Alpaca for US symbols and historical prices while retaining FMP profiles for market cap/industry classification and FMP for industry performance. This supersedes the earlier FMP-only implementation direction below. Alpaca credentials were tested successfully on September 22: the active US asset list contained 14,357 entries and AAPL/MSFT split-adjusted SIP historical prices were retrieved. FMP profiles for AAPL, MSFT, SOUN, and RIOT returned market cap, industry, and asset flags. FMP stock-list and profile-bulk returned HTTP 402. FMP profile access and classification have been verified for only those four symbols. See [ALPACA_SETUP.md](ALPACA_SETUP.md) and [FMP_CAPABILITY_REPORT.md](FMP_CAPABILITY_REPORT.md).
+After the FMP screener returned HTTP 402, the user chose Alpaca for US symbols/prices and FMP profiles for market cap/classification plus FMP industry data. Alpaca credentials worked on September 22: the active asset list contained 14,357 entries and AAPL/MSFT split-adjusted SIP histories were retrieved. Initial FMP profile probes succeeded for AAPL, MSFT, SOUN and RIOT; subsequent enrichment and ranking runs expanded the sample as documented below, without proving universal access. FMP stock-list and profile-bulk returned HTTP 402. See [ALPACA_SETUP.md](ALPACA_SETUP.md) and [FMP_CAPABILITY_REPORT.md](FMP_CAPABILITY_REPORT.md).
 
 A full Alpaca price coverage scan was subsequently completed for September 18 and 21, 2026: 144/144 batches succeeded, 144 Alpaca requests were made, and 13,244 of 14,357 active US asset entries had prices on both dates. This establishes usable price coverage for that interval, not company classification or market-cap qualification. No FMP requests were used in the full price scan. The resumable implementation and report are documented in [ALPACA_SETUP.md](ALPACA_SETUP.md).
 
-On September 22, the user selected FMP again for both individual stocks and industries after considering Alpha Vantage and a two-provider approach. Proceed with FMP Free: use the stock screener to identify qualifying companies, retrieve price histories for the supported qualifying symbols, then calculate and rank period returns locally. Alpha Vantage is not part of the selected implementation.
+Earlier on September 22, the user selected FMP Free for stocks and industries. The subsequent screener HTTP 402 findings superseded that direction: use Alpaca assets/prices and FMP individual profiles/industry data. Do not implement the inaccessible screener path. Alpha Vantage is not selected.
 
-The user reaffirmed the 250-call daily budget as the starting assumption. Reserve calls for screening, industry data, metadata refreshes, and retries before determining stock scan capacity. Endpoint access and supported symbols still require an authenticated capability probe; 250 calls does not guarantee access to every screened symbol. If the complete qualifying set exceeds access or request limits, report that limitation explicitly rather than silently truncating the rankings.
+The user reaffirmed the 250-call daily budget as the starting assumption. The shared local profile ceiling is 200 attempts per UTC day, leaving 50 for industry data and other usage. It cannot observe external requests or verify the vendor reset time. Prioritize profile requests needed by return-ordered ranking; background alphabetical enrichment is optional and now defaults to at most 25 new requests per run within that same ceiling. Run ranking before optional filling. No automatic scheduler enforces this ordering yet. Report incomplete rankings explicitly rather than silently truncating them.
+
+The September 22 enrichment report saved 73 profiles from 79 requests and recorded 111 cached candidate profiles, with 13,520 missing. It stopped after three HTTP 402 responses. The code was subsequently changed to skip consecutive per-symbol 402 responses while stopping on authentication, rate-limit, API-error payloads, or request failures. The saved report is historical and must not be rewritten to imply a new run.
+
+A full weekly refresh of 13,631 candidates would require at least 1,948 profile requests/day, beyond the 200-attempt ceiling. Filling the missing 13,520 takes at least 68 days even if all 200 attempts/day succeed and none are used for refreshes or ranking. Do not wait for a fully fresh universe: use the 90-day refresh target/180-day reuse policy described above. Cached count alone does not establish usable coverage.
 
 ## Product intent
 
@@ -59,11 +71,11 @@ Proposed screens: Market Summary, Stock Detail, Industry Detail, Settings. Notif
 
 ## PWA architecture
 
-Use a React + TypeScript web interface, a Node.js + TypeScript backend, a database, and standards-based Web Push. These are the working technical direction; exact framework, database vendor, and hosting vendor are not yet selected.
+Use a React + TypeScript web interface, a Node.js + TypeScript backend, and standards-based Web Push. AWS Lambda/EventBridge/DynamoDB/Secrets Manager are now selected for the backend; local diagnostics retain SQLite. Frontend framework details and the PWA hosting configuration remain pending.
 
 The backend should:
 
-1. Collect permitted FMP data within the daily allowance.
+1. Collect Alpaca prices/assets and permitted FMP profiles/industry data within their request limits.
 2. Cache company metadata and retain dated price/industry observations.
 3. Apply preferences and calculate stock returns/rankings.
 4. Save immutable alert snapshots.
@@ -99,6 +111,8 @@ Actual access, response size/pagination, symbol coverage, missing fields, histor
 FMP pricing changed or differed between fetched pages during the discussion. Do not rely on quoted paid-tier dollar figures from chat; verify current pricing if upgrading. The selected Free tier is the relevant starting point.
 
 ## Individual-stock approach
+
+October 19 diagnostic: reran cached September 18/21 prices with the same test settings ($10B minimum cap, five per direction), capped at 25 new FMP requests. All 25 returned usable profiles and were cached; none qualified (below cap, non-US domicile, or fund/ETF). No fresh-cache hits were available for those candidates. The next candidate, NUAI, hit the local run limit, so the result was `incomplete` / `budget_exhausted`, with no winners and no loser pass. This was not vendor quota exhaustion. No Alpaca calls or notifications were made. `data/ranking-report.json` contains the latest report; `data/profile-enrichment-report.json` remains the historical September background-fill report. A subsequent bounded ranking run can reuse these refreshed profiles. Profiles describe current metadata, not historical market caps for the September prices.
 
 Current approach: Alpaca asset list → split-adjusted SIP daily bars → calculate period returns → exclude explicitly described warrants/rights → inspect/cache FMP profiles in return order → apply market-cap, company/fund and industry criteria → save a summary only if the ranking completes. The paid FMP screener is not used. The older FMP endpoint table below is historical context for the initial provider evaluation.
 
@@ -215,18 +229,18 @@ The user should open `.env.local` manually in the editor, paste the key immediat
 
 Git ignore and agent instructions do not create a technical filesystem access barrier. A readable local file could still be accessed by a process with permission. The intended protection here is keeping the key out of code/Git/model context and honoring explicit agent instructions; an enforced denial would require a separate permissions or secret-management setup.
 
-The dependency-free Node diagnostic in `scripts/fmp-probe.mjs` implements backend-only environment loading. The application backend is not yet built. Do not use a frontend-public variable such as `VITE_FMP_API_KEY`, `NEXT_PUBLIC_FMP_API_KEY`, or `EXPO_PUBLIC_FMP_API_KEY`.
+The dependency-free Node diagnostic in `scripts/fmp-probe.mjs` implements backend-only environment loading. The cloud collection worker reads an existing Secrets Manager secret at runtime. The public application API is not yet built. Do not use a frontend-public variable such as `VITE_FMP_API_KEY`, `NEXT_PUBLIC_FMP_API_KEY`, or `EXPO_PUBLIC_FMP_API_KEY`.
 
 ## State at handoff and next steps
 
-The repository now includes a TypeScript backend foundation, a local SQLite cache, Alpaca and FMP clients, a resumable full price scan, and a bounded cached-ranking diagnostic. No PWA, scheduled jobs, saved notification snapshots, or Web Push integration exists yet. Current validation: 15 offline tests and TypeScript checks pass.
+The repository includes local diagnostics plus a deployable scheduled AWS profile worker. No resources are deployed, and cloud price jobs, PWA/API, immutable notification snapshots and Web Push are not implemented. All 29 offline tests pass, including the final next-UTC-day retry adjustment. TypeScript, bundle building/loading, template safeguard checks, Git diff whitespace checks and SAM lint validation also pass. Commands: `npm test`, `npm run typecheck`, `npm run cloud:build`, `npm run cloud:validate`, `sam validate --lint --template-file template.yaml --region ca-central-1`. A deployed smoke test remains required.
 
 Next session:
 
 1. Read this handoff and AGENTS.md. Preserve the accepted PWA/Alpaca/FMP direction and latest user corrections.
-2. Continue bounded profile enrichment using cached price rankings. Confirm the desired market-cap threshold and country/listing interpretation before product defaults are finalized.
+2. Follow AWS_SETUP.md to configure/deploy the disabled worker, migrate existing profiles, then enable collection with the correct activation-day budget. Stop local provider commands once cloud jobs are active. Confirm the market-cap threshold and country/listing interpretation before product defaults are finalized.
 3. Implement frequency-aware period selection using trading sessions; confirm industry methodology and request budget. Manual September 18/21 dates were only a daily coverage test.
-4. Choose lightweight hosting/database options and resolve any period/calculation details needed for a concrete implementation.
+4. Build hosted dated price ingestion and summaries on the selected AWS backend; resolve period/calculation details and frontend hosting configuration.
 5. Scaffold the TypeScript PWA/backend, preferences and alert storage, then implement stock and industry summaries.
 6. Add shared scheduling, the two Web Push notification types, and links to saved results. Validate on the user's iPhone.
 7. Add polish/history and, later, ETF/Canadian/live data and AI as supported and desired.

@@ -2,7 +2,8 @@ import { percentChange, type PriceBar } from './alpaca.js';
 import type { CompanyProfile } from './cache.js';
 import type { ProfileResult } from './fmp-profile.js';
 
-export type RankedStock = { symbol: string; changePercent: number; marketCap: number; industry: string | null };
+export type RankedStock = { symbol: string; changePercent: number; marketCap: number; industry: string | null;
+  profileObservedAt: string };
 export type RankResult =
   | { status: 'complete'; gainers: RankedStock[]; losers: RankedStock[]; checkedProfiles: number }
   | { status: 'incomplete'; reason: 'missing_prices' | 'profile_unavailable' | 'budget_exhausted'; checkedProfiles: number };
@@ -47,7 +48,7 @@ export async function rankStocks(
     if (selectedIndustries && !p.industry) return 'unavailable';
     if (selectedIndustries && !selectedIndustries.has(p.industry!)) return null;
     return { symbol: candidate.symbol, changePercent: candidate.changePercent,
-      marketCap: p.marketCap, industry: p.industry };
+      marketCap: p.marketCap, industry: p.industry, profileObservedAt: p.fetchedAt };
   }
   for (const [ordered, selected] of [
     [changes.filter(candidate => candidate.changePercent > 0), gainers],

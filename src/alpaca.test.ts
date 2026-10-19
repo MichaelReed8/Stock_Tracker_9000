@@ -227,3 +227,38 @@ test('profile enrichment passes consecutive paywalled listings but stops on HTTP
   assert.equal(calls, 4);
   db.close();
 });
+
+test('background enrichment bounds spending, reports stale coverage, and resumes within the daily ceiling', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'enrichment-budget-test-'));
+  const db = await CacheDb.open(join(dir, 'cache.sqlite'));
+  try {
+    const symbols = Array.from({ length: 30 }, (_, i) => `S${i}`);
+    await db.replaceAssets(symbols.map(symbol => ({ symbol, name: symbol, exchange: 'NASDAQ' })), new Date().toISOString());
+    await db.putProfile({ symbol: 'S0', fetchedAt: '2020-01-01T00:00:00Z', marketCap: 100,
+      country: 'US', industry: null, sector: null, isEtf: false, isFund: false });
+    let calls = 0;
+    const fetchImpl = (async (url: URL) => {
+      calls++;
+      return new Response(JSON.stringify([{ symbol: url.searchParams.get('symbol'), marketCap: 100 }]));
+    }) as typeof fetch;
+    const dry = await enrichProfiles(db, '', { dailyLimit: 28, dryRun: true }, fetchImpl);
+    assert.equal(calls, 0);
+    assert.equal(dry.staleCandidateProfiles, 1);
+    assert.equal(dry.freshCandidateProfiles, 0);
+    assert.equal(dry.plannedRequests, 25);
+    assert.equal(dry.fullUniverseWeeklyRefreshDailyRequests, 5);
+    const first = await enrichProfiles(db, 'fake-key', { dailyLimit: 28, spacingMs: 0 }, fetchImpl);
+    assert.equal(first.newRequests, 25);
+    assert.equal(first.stopReason, 'run_request_limit');
+    assert.equal(first.remainingTrackedDailyRequests, 3);
+    assert.equal(db.getProfile('S0')!.fetchedAt, '2020-01-01T00:00:00Z');
+    const next = await enrichProfiles(db, 'fake-key', { dailyLimit: 28, spacingMs: 0 }, fetchImpl);
+    assert.equal(next.newRequests, 3);
+    assert.equal(next.stopReason, 'local_daily_limit');
+    const zero = await enrichProfiles(db, 'fake-key', { dailyLimit: 200, maxNewRequests: 0 }, fetchImpl);
+    assert.equal(zero.newRequests, 0);
+    assert.equal(zero.stopReason, 'run_request_limit');
+    assert.equal(calls, 28);
+    await assert.rejects(enrichProfiles(db, '', { dailyLimit: 200, maxNewRequests: -1 }, fetchImpl));
+  } finally { db.close(); }
+});

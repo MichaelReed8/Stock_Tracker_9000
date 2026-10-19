@@ -1,5 +1,7 @@
 # FMP capability check
 
+Historical report: these FMP observations are from September 22, 2026. The selected implementation now uses Alpaca assets and split-adjusted SIP prices with FMP individual profiles and industry data; see [ALPACA_SETUP.md](ALPACA_SETUP.md). Later Alpaca coverage and profile enrichment supersede the limited samples discussed below, without establishing universal FMP profile access. The screener is not part of the selected implementation.
+
 Checked September 22, 2026 using the user's locally configured key. Ten HTTP requests were attempted in total, including two follow-up requests for alternative stock and market-cap sources. Vendor quota consumption and remaining allowance were not returned or verified.
 
 | Check | Result |

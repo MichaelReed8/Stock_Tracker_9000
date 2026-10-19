@@ -7,10 +7,11 @@ import { enrichProfiles } from './profile-enrichment.js';
 let cache: CacheDb | undefined;
 try {
   const args = process.argv.slice(2);
-  if (args.some(arg => arg !== '--dry-run' && !/^--daily-limit=\d+$/.test(arg))) {
+  if (args.some(arg => arg !== '--dry-run' && !/^--(?:daily-limit|max-new-requests)=\d+$/.test(arg))) {
     throw new Error('Invalid arguments');
   }
   const dailyLimit = Number(args.find(arg => arg.startsWith('--daily-limit='))?.split('=')[1] ?? 200);
+  const maxNewRequests = Number(args.find(arg => arg.startsWith('--max-new-requests='))?.split('=')[1] ?? 25);
   const dryRun = args.includes('--dry-run');
   let key = '';
   if (!dryRun) {
@@ -19,7 +20,7 @@ try {
     if (!key) throw new Error('Missing configuration');
   }
   cache = await CacheDb.open(fileURLToPath(new URL('../data/stock-cache.sqlite', import.meta.url)));
-  const report = await enrichProfiles(cache, key, { dailyLimit, dryRun }, fetch, (requests, saved) => {
+  const report = await enrichProfiles(cache, key, { dailyLimit, maxNewRequests, dryRun }, fetch, (requests, saved) => {
     if (requests % 10 === 0) console.log(`FMP requests this run: ${requests}; profiles saved: ${saved}`);
   });
   let output = JSON.stringify(report, null, 2);

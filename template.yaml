@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Stock Tracker scheduled profile collection (no public API)
+Parameters:
+  ProviderSecretArn:
+    Type: String
+    Description: ARN of an existing Secrets Manager JSON secret; never supply secret values as parameters.
+    AllowedPattern: 'arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+'
+  ScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+  ProfileDailyLimit:
+    Type: Number
+    Default: 200
+    MinValue: 0
+    MaxValue: 200
+  ProfileBatchLimit:
+    Type: Number
+    Default: 25
+    MinValue: 1
+    MaxValue: 100
+Resources:
+  DataTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: pk, AttributeType: S}
+        - {AttributeName: sk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: pk, KeyType: HASH}
+        - {AttributeName: sk, KeyType: RANGE}
+      SSESpecification: {SSEEnabled: true}
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      TimeToLiveSpecification: {AttributeName: expiresAt, Enabled: true}
+  FailureQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+  ProfileWorker:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: dist/cloud/
+      Handler: handler.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 512
+      Timeout: 600
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          DATA_TABLE: {Ref: DataTable}
+          PROVIDER_SECRET_ARN: {Ref: ProviderSecretArn}
+          PROFILE_DAILY_LIMIT: {Ref: ProfileDailyLimit}
+          PROFILE_BATCH_LIMIT: {Ref: ProfileBatchLimit}
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: {Ref: DataTable}
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: {Ref: ProviderSecretArn}
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 3600
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: {Fn::GetAtt: [FailureQueue, Arn]}
+      Events:
+        HourlyCollection:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: 'cron(0 * * * ? *)'
+            ScheduleExpressionTimezone: America/Toronto
+            FlexibleTimeWindow: {Mode: 'OFF'}
+            State: {Ref: ScheduleState}
+            RetryPolicy:
+              MaximumRetryAttempts: 0
+              MaximumEventAgeInSeconds: 3600
+            DeadLetterConfig:
+              Arn: {Fn::GetAtt: [FailureQueue, Arn]}
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: {Fn::Sub: '/aws/lambda/${ProfileWorker}'}
+      RetentionInDays: 14
+  WorkerErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scheduled profile worker failed; inspect sanitized logs and failure queue.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: {Ref: ProfileWorker}
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  DeliveryFailures:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scheduled delivery or Lambda invocation failed; inspect the failure queue.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: {Fn::GetAtt: [FailureQueue, QueueName]}
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+Outputs:
+  TableName:
+    Value: {Ref: DataTable}
+  WorkerName:
+    Value: {Ref: ProfileWorker}
+  FailureQueueUrl:
+    Value: {Ref: FailureQueue}
