@@ -1,0 +1,10 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem", "dynamodb:DescribeTable", "dynamodb:ConditionCheckItem"], "Resource": "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/stock-tracker-9000-*" },
+    { "Effect": "Allow", "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], "Resource": "arn:aws:logs:REGION:ACCOUNT_ID:log-group:/aws/lambda/stock-tracker-9000-*:*" },
+    { "Effect": "Allow", "Action": "secretsmanager:GetSecretValue", "Resource": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:stock-tracker-9000/providers-*" },
+    { "Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:stock-tracker-9000-*" },
+    { "Effect": "Allow", "Action": ["sqs:SendMessage", "sqs:GetQueueAttributes"], "Resource": "arn:aws:sqs:REGION:ACCOUNT_ID:stock-tracker-9000-*" }
+  ]
+}

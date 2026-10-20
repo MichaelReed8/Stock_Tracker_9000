@@ -30,6 +30,22 @@ test('multi-symbol historical bars follow pagination and request split-adjusted 
   assert.equal(requested[1].searchParams.get('page_token'), 'page-2');
 });
 
+test('calendar reads validate sessions and same-day bars respect the delayed-feed cutoff', async () => {
+  const requested: URL[] = [];
+  const fetchImpl = (async (url: URL) => {
+    requested.push(url);
+    return new Response(JSON.stringify(url.pathname.endsWith('/calendar')
+      ? [{ date: '2026-07-02', open: '09:30', close: '13:00' }]
+      : { bars: { AAPL: [{ t: '2026-07-02T04:00:00Z', c: 100 }] }, next_page_token: null }));
+  }) as typeof fetch;
+  const client = new AlpacaClient('fake-id', 'fake-secret', fetchImpl, 0, { maxRequests: 2 });
+  assert.equal((await client.calendar('2026-07-01', '2026-07-06'))[0].close, '13:00');
+  await client.dailyBars(['AAPL'], '2026-07-01', '2026-07-02', new Date('2026-07-02T19:40:00Z'));
+  assert.equal(requested[1].searchParams.get('end'), '2026-07-02T19:40:00.000Z');
+  await assert.rejects(client.dailyBars(['AAPL'], '2026-07-01', '2026-07-02'), /allowance/);
+  assert.equal(requested.length, 2);
+});
+
 test('network errors do not expose Alpaca credentials', async () => {
   const fetchImpl = (async () => { throw new Error('secret-value'); }) as typeof fetch;
   await assert.rejects(new AlpacaClient('id', 'secret-value', fetchImpl)

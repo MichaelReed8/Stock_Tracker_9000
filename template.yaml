@@ -1,7 +1,35 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Stock Tracker scheduled profile collection (no public API)
+Description: Stock Tracker scheduled collection and authenticated summary PWA
 Parameters:
+  SummaryMinimumMarketCap:
+    Type: Number
+    Default: 10000000000
+    MinValue: 0
+  SummaryCountPerDirection:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 20
+  PriceCloseDelayMinutes:
+    Type: Number
+    Default: 90
+    MinValue: 20
+    MaxValue: 1440
+  NotificationEmail:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Optional operational alarm email; subscription requires recipient confirmation.
+  ReserveWorkerConcurrency:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Enable only when the regional Lambda quota leaves at least 100 unreserved executions.
+  RuntimeBoundaryArn:
+    Type: String
+    Description: App runtime permissions boundary created during deployment identity setup.
+    AllowedPattern: 'arn:aws:iam::[0-9]{12}:policy/stock-tracker-9000-runtime-boundary'
   ProviderSecretArn:
     Type: String
     Description: ARN of an existing Secrets Manager JSON secret; never supply secret values as parameters.
@@ -20,7 +48,146 @@ Parameters:
     Default: 25
     MinValue: 1
     MaxValue: 100
+Conditions:
+  EnableEmailAlerts:
+    Fn::Not: [{Fn::Equals: [{Ref: NotificationEmail}, '']}]
+  UseDedicatedConcurrency:
+    Fn::Equals: [{Ref: ReserveWorkerConcurrency}, ENABLED]
 Resources:
+  WebUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: stock-tracker-9000-users
+      UserPoolTier: LITE
+      UsernameAttributes: [email]
+      UsernameConfiguration: {CaseSensitive: false}
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      AccountRecoverySetting:
+        RecoveryMechanisms: [{Name: verified_email, Priority: 1}]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+      UserPoolTags: {Application: stock-tracker-9000}
+  WebUserClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: {Ref: WebUserPool}
+      ClientName: stock-tracker-9000-web
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 15
+      IdTokenValidity: 15
+      RefreshTokenValidity: 30
+      TokenValidityUnits: {AccessToken: minutes, IdToken: minutes, RefreshToken: days}
+  WebApp:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: dist/web/
+      Handler: web-handler.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 15
+      PermissionsBoundary: {Ref: RuntimeBoundaryArn}
+      Environment:
+        Variables:
+          DATA_TABLE: {Ref: DataTable}
+          USER_POOL_ID: {Ref: WebUserPool}
+          USER_POOL_CLIENT_ID: {Ref: WebUserClient}
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: {Fn::GetAtt: [DataTable, Arn]}
+              Condition:
+                ForAllValues:StringLike:
+                  'dynamodb:LeadingKeys': [SUMMARY, 'SUMMARY#*']
+  WebLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: {Fn::Sub: '/aws/lambda/${WebApp}'}
+      RetentionInDays: 14
+  WebUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: {Fn::GetAtt: [WebApp, Arn]}
+      AuthType: NONE
+  WebUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: {Ref: WebApp}
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+  WebInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: {Ref: WebApp}
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      InvokedViaFunctionUrl: true
+  WebErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The summary web function has repeated runtime errors.
+      AlarmActions: {Fn::If: [EnableEmailAlerts, [{Ref: JobAlerts}], {Ref: 'AWS::NoValue'}]}
+      Namespace: StockTracker/Web
+      MetricName: {Fn::Sub: '${WebApp}-Failures'}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  WebFailureMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: {Ref: WebLogGroup}
+      FilterPattern: '"Web request failed"'
+      MetricTransformations:
+        - MetricNamespace: StockTracker/Web
+          MetricName: {Fn::Sub: '${WebApp}-Failures'}
+          MetricValue: '1'
+  JobAlerts:
+    Type: AWS::SNS::Topic
+    Condition: EnableEmailAlerts
+    Properties:
+      TopicName: stock-tracker-9000-job-alerts
+  JobAlertEmail:
+    Type: AWS::SNS::Subscription
+    Condition: EnableEmailAlerts
+    Properties:
+      Protocol: email
+      Endpoint: {Ref: NotificationEmail}
+      TopicArn: {Ref: JobAlerts}
+  JobAlertPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Condition: EnableEmailAlerts
+    Properties:
+      Topics: [{Ref: JobAlerts}]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: sns:Publish
+            Resource: {Ref: JobAlerts}
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': {Ref: 'AWS::AccountId'}
+              ArnLike:
+                'aws:SourceArn': {Fn::Sub: 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${AWS::StackName}-*'}
   DataTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -50,13 +217,18 @@ Resources:
       Architectures: [arm64]
       MemorySize: 512
       Timeout: 600
-      ReservedConcurrentExecutions: 1
+      ReservedConcurrentExecutions:
+        Fn::If: [UseDedicatedConcurrency, 1, {Ref: 'AWS::NoValue'}]
+      PermissionsBoundary: {Ref: RuntimeBoundaryArn}
       Environment:
         Variables:
           DATA_TABLE: {Ref: DataTable}
           PROVIDER_SECRET_ARN: {Ref: ProviderSecretArn}
           PROFILE_DAILY_LIMIT: {Ref: ProfileDailyLimit}
           PROFILE_BATCH_LIMIT: {Ref: ProfileBatchLimit}
+          SUMMARY_MIN_CAP: {Ref: SummaryMinimumMarketCap}
+          SUMMARY_COUNT: {Ref: SummaryCountPerDirection}
+          PRICE_CLOSE_DELAY_MINUTES: {Ref: PriceCloseDelayMinutes}
       Policies:
         - DynamoDBCrudPolicy:
             TableName: {Ref: DataTable}
@@ -79,6 +251,8 @@ Resources:
             ScheduleExpressionTimezone: America/Toronto
             FlexibleTimeWindow: {Mode: 'OFF'}
             State: {Ref: ScheduleState}
+            Name: stock-tracker-9000-profile-collection
+            PermissionsBoundary: {Ref: RuntimeBoundaryArn}
             RetryPolicy:
               MaximumRetryAttempts: 0
               MaximumEventAgeInSeconds: 3600
@@ -92,7 +266,8 @@ Resources:
   WorkerErrors:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: Scheduled profile worker failed; inspect sanitized logs and failure queue.
+      AlarmActions: {Fn::If: [EnableEmailAlerts, [{Ref: JobAlerts}], {Ref: 'AWS::NoValue'}]}
+      AlarmDescription: Scheduled collection worker failed; inspect sanitized logs and failure queue.
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions:
@@ -104,9 +279,101 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+  ProviderFailureMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: {Ref: WorkerLogGroup}
+      FilterPattern: '{ $.providerFailure = * }'
+      MetricTransformations:
+        - MetricNamespace: StockTracker/ProfileCollection
+          MetricName: {Fn::Sub: '${ProfileWorker}-ProviderFailures'}
+          MetricValue: '$.providerFailure'
+  PermanentProviderFailureMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: {Ref: WorkerLogGroup}
+      FilterPattern: '{ $.permanentProviderFailure = * }'
+      MetricTransformations:
+        - MetricNamespace: StockTracker/ProfileCollection
+          MetricName: {Fn::Sub: '${ProfileWorker}-PermanentProviderFailure'}
+          MetricValue: '$.permanentProviderFailure'
+  ProgressHealthMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: {Ref: WorkerLogGroup}
+      FilterPattern: '{ $.progressHealthy = * }'
+      MetricTransformations:
+        - MetricNamespace: StockTracker/ProfileCollection
+          MetricName: {Fn::Sub: '${ProfileWorker}-ProgressHealthy'}
+          MetricValue: '$.progressHealthy'
+  PriceHealthMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: {Ref: WorkerLogGroup}
+      FilterPattern: '{ $.priceHealthy = * }'
+      MetricTransformations:
+        - MetricNamespace: StockTracker/ProfileCollection
+          MetricName: {Fn::Sub: '${ProfileWorker}-PriceHealthy'}
+          MetricValue: '$.priceHealthy'
+  PriceSummaryStalled:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions: {Fn::If: [EnableEmailAlerts, [{Ref: JobAlerts}], {Ref: 'AWS::NoValue'}]}
+      AlarmDescription: Three hourly periods without a completed price summary or healthy waiting state. Profile budget exhaustion cannot mask a price failure.
+      Namespace: StockTracker/ProfileCollection
+      MetricName: {Fn::Sub: '${ProfileWorker}-PriceHealthy'}
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+  ProviderPaused:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions: {Fn::If: [EnableEmailAlerts, [{Ref: JobAlerts}], {Ref: 'AWS::NoValue'}]}
+      AlarmDescription: Authentication, quota or unclassified provider failure paused collection for this UTC day. Inspect RUN reports and provider configuration.
+      Namespace: StockTracker/ProfileCollection
+      MetricName: {Fn::Sub: '${ProfileWorker}-PermanentProviderFailure'}
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  RepeatedProviderFailures:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions: {Fn::If: [EnableEmailAlerts, [{Ref: JobAlerts}], {Ref: 'AWS::NoValue'}]}
+      AlarmDescription: Provider failures in three consecutive hourly periods; automatic recovery is not succeeding.
+      Namespace: StockTracker/ProfileCollection
+      MetricName: {Fn::Sub: '${ProfileWorker}-ProviderFailures'}
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  NoCollectionProgress:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions: {Fn::If: [EnableEmailAlerts, [{Ref: JobAlerts}], {Ref: 'AWS::NoValue'}]}
+      AlarmDescription: Three hourly periods without progress or a healthy idle report. Covers failed or missing invocations; normal budget exhaustion and empty queues remain healthy.
+      Namespace: StockTracker/ProfileCollection
+      MetricName: {Fn::Sub: '${ProfileWorker}-ProgressHealthy'}
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
   DeliveryFailures:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      AlarmActions: {Fn::If: [EnableEmailAlerts, [{Ref: JobAlerts}], {Ref: 'AWS::NoValue'}]}
       AlarmDescription: Scheduled delivery or Lambda invocation failed; inspect the failure queue.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
@@ -120,6 +387,15 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 Outputs:
+  AppUrl:
+    Value: {Fn::GetAtt: [WebUrl, FunctionUrl]}
+  UserPoolId:
+    Value: {Ref: WebUserPool}
+  WebClientId:
+    Value: {Ref: WebUserClient}
+  JobAlertsTopicArn:
+    Condition: EnableEmailAlerts
+    Value: {Ref: JobAlerts}
   TableName:
     Value: {Ref: DataTable}
   WorkerName:

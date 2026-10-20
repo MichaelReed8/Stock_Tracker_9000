@@ -42,7 +42,7 @@ export async function enrichProfiles(cache: CacheDb, key: string,
     audit.push({ symbol: asset.symbol, outcome });
     if (result.status === 'available') saved++;
     onProgress?.(cache.getFmpAttempts(utcDate) - attemptsBefore, saved);
-    if (['rate_limited', 'missing_key', 'unauthorized', 'forbidden', 'api_error_payload', 'request_failed', 'http_error', 'budget_exhausted'].includes(outcome)) {
+    if (['rate_limited', 'missing_key', 'unauthorized', 'forbidden', 'api_error_payload', 'request_failed', 'server_error', 'http_error', 'budget_exhausted'].includes(outcome)) {
       stopReason = outcome; break;
     }
     // HTTP 402 can affect consecutive preferred-share listings; skip them without retrying.

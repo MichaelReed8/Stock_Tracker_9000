@@ -8,20 +8,29 @@
     "ranking:check": "tsx src/ranking-check.ts",
     "profiles:seed": "tsx src/profile-seed.ts",
     "profiles:fill": "tsx src/profiles-fill.ts",
-    "test": "node --test scripts/fmp-probe.test.mjs && tsx --test src/alpaca.test.ts src/cloud/profile-job.test.ts src/profile-policy.test.ts src/cloud/store.test.ts",
+    "test": "node --test scripts/fmp-probe.test.mjs && tsx --test src/alpaca.test.ts src/cloud/profile-job.test.ts src/profile-policy.test.ts src/cloud/store.test.ts src/cloud/health.test.ts src/cloud/daily-summary.test.ts src/cloud/price-job.test.ts src/cloud/collection.test.ts src/cloud/web-api.test.ts",
     "cloud:build": "esbuild src/cloud/handler.ts --bundle --platform=node --target=node22 --format=esm --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=dist/cloud/handler.mjs",
     "cloud:validate": "node scripts/validate-cloud.mjs",
     "cloud:import": "tsx src/cloud/import-local.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --project web/tsconfig.json",
+    "web:build": "node scripts/build-web.mjs",
+    "web:dev": "tsx scripts/serve-web.mjs",
+    "web:test": "tsx --test src/cloud/web-api.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1153.0",
     "@aws-sdk/client-secrets-manager": "^3.1153.0",
     "@aws-sdk/lib-dynamodb": "^3.1153.0",
+    "aws-jwt-verify": "^5.2.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "sql.js": "^1.13.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^20.19.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/sql.js": "^1.4.9",
     "esbuild": "^0.28.2",
     "tsx": "^4.20.0",

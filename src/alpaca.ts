@@ -1,5 +1,6 @@
 export type PriceBar = { symbol: string; date: string; close: number };
 export type AlpacaAsset = { symbol: string; name: string; exchange: string };
+export type TradingSession = { date: string; open: string; close: string };
 
 const symbolPattern = /^[A-Z][A-Z0-9.-]{0,14}$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -14,11 +15,15 @@ export class AlpacaClient {
     private readonly secretKey: string,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly minRequestSpacingMs = 350,
+    private readonly limits?: { maxRequests: number; shouldStop?: () => boolean },
   ) {
     if (!keyId || !secretKey) throw new Error('Alpaca credentials are not configured');
   }
 
   private async get(url: URL): Promise<unknown> {
+    if (this.requestCount >= (this.limits?.maxRequests ?? Infinity) || this.limits?.shouldStop?.()) {
+      throw new Error('Alpaca request allowance or execution time reached');
+    }
     try {
       const remaining = this.minRequestSpacingMs - (Date.now() - this.lastRequestAt);
       if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
@@ -56,7 +61,23 @@ export class AlpacaClient {
     ).map(row => ({ symbol: row.symbol as string, name: row.name as string, exchange: row.exchange as string }));
   }
 
-  async dailyBars(symbols: string[], start: string, end: string): Promise<PriceBar[]> {
+  async calendar(start: string, end: string): Promise<TradingSession[]> {
+    if (!datePattern.test(start) || !datePattern.test(end) || start > end) throw new Error('Invalid calendar dates');
+    const url = new URL('https://paper-api.alpaca.markets/v2/calendar');
+    url.searchParams.set('start', start);
+    url.searchParams.set('end', end);
+    const data = await this.get(url);
+    if (!Array.isArray(data) || !data.length) throw new Error('No market calendar returned');
+    return data.map(row => {
+      if (!isRecord(row) || typeof row.date !== 'string' || !datePattern.test(row.date) ||
+        typeof row.open !== 'string' || typeof row.close !== 'string' ||
+        !/^\d{2}:\d{2}$/.test(row.open) || !/^\d{2}:\d{2}$/.test(row.close) ||
+        row.date < start || row.date > end || row.open >= row.close) throw new Error('Invalid market calendar');
+      return { date: row.date, open: row.open, close: row.close };
+    });
+  }
+
+  async dailyBars(symbols: string[], start: string, end: string, availableThrough?: Date): Promise<PriceBar[]> {
     if (!symbols.length || symbols.length > 100 || symbols.some(symbol => !symbolPattern.test(symbol))) {
       throw new Error('Use 1 to 100 valid symbols per historical-bars request');
     }
@@ -71,7 +92,9 @@ export class AlpacaClient {
       url.searchParams.set('symbols', symbols.join(','));
       url.searchParams.set('timeframe', '1Day');
       url.searchParams.set('start', start);
-      url.searchParams.set('end', `${end}T23:59:59Z`);
+      const endMs = Math.min(Date.parse(`${end}T23:59:59Z`), availableThrough?.getTime() ?? Infinity);
+      if (!Number.isFinite(endMs) || endMs < Date.parse(`${start}T00:00:00Z`)) throw new Error('Invalid available price interval');
+      url.searchParams.set('end', new Date(endMs).toISOString());
       url.searchParams.set('limit', '10000');
       url.searchParams.set('feed', 'sip');
       url.searchParams.set('adjustment', 'split');

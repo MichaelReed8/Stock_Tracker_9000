@@ -1,14 +1,38 @@
 # Stock Tracker 9000 — project handoff
 
-Last updated: October 19, 2026. September provider observations remain historical; an October 19 bounded profile/ranking check is recorded below.
+Last updated: October 20, 2026. Provider observations retain their original dates; current recovery and monitoring changes are described below.
+
+## October 20: summary frontend
+
+The user requested a frontend and explicitly selected AWS hosting. Implemented a React/TypeScript iPhone Home Screen PWA with daily gainers/losers, stock details, dated market caps, research links, coverage counts, and immutable saved-summary links. A separate read-only Lambda serves the shell and authenticated summary endpoints. Cognito Lite permits only invited accounts; no provider credentials or table-write permissions reach this Lambda/browser. The existing hourly worker and its budgets are unchanged. The user explicitly approved app-tag-scoped Cognito deployment-policy permissions and an AWS sign-in invitation to their existing operational-alert email. See [FRONTEND.md](FRONTEND.md) for operation, development, authentication limits and verification. Industry summaries, longer periods, editable settings and push remain unimplemented.
+
+## October 20: daily prices and saved stock summaries
+
+At the user's request, the existing hourly worker now collects daily prices and saves immutable stock-summary previews. There is still one scheduler/Lambda, with independently handled profile and price stages. FMP exhaustion or profile failure cannot suppress price work. Profiles have a two-minute target; prices have their own 11-minute lease, resumable batch records and 190-request/time bounds. No extra credentials or runtime IAM permissions were needed.
+
+The user selected $10B minimum cap and five gainers/five losers. Alpaca's calendar supplies trading sessions/early closes; New York timezone handling covers DST. Collection waits 90 minutes after the scheduled close and compares with the preceding trading session. Both closes are fetched together with SIP split adjustment, with the API end at least 20 minutes old. Dividends are excluded. Market cap remains a dated cached observation, not historical cap on the price dates.
+
+The first deployed run completed 145 batches for October 16 → 19 using 146 Alpaca requests and zero FMP requests. It froze 14,412 assets, excluded 712 explicit warrants/rights and 999 entries missing prices, and found 12,701 priced candidates. Of these, 12,400 lacked profiles; 17 qualified. Five gainers and five losers were saved. The scope explicitly says cached-profile coverage, and `notificationEligible=false`. This implements the user's decision to build usable, clearly scoped summaries while profiles accumulate; do not describe previews as a whole-market leaderboard or silently weaken the separate strict diagnostic.
+
+The snapshot and latest pointer were read back from DynamoDB. A repeat reused the same snapshot ID with zero new price batches, zero Alpaca requests and zero FMP requests. New profile coverage can create immutable revisions without new price downloads. The sixth operational alarm watches independent price-summary health, so a healthy FMP budget stop cannot hide price failure. All 58 offline tests, TypeScript, bundle checks and SAM lint pass. See [DAILY_SUMMARIES.md](DAILY_SUMMARIES.md) for record keys, semantics, verification and limits. The subsequent frontend update above implements the PWA/API for these saved summaries; industry summaries, longer periods and push remain unimplemented.
+
+## October 20: hourly recovery and email monitoring
+
+The user chose to retain hourly batches and improve recovery rather than switch to a once-daily job. Temporary FMP network/timeout, HTTP 408 and HTTP 5xx failures now receive a 30-minute cooldown, allowing later hourly runs to retry the same symbol that day. The last good profile is retained. Cooldown/attempt eligibility is written transactionally, and every retry reserves another daily call. Authentication, quota and other unclassified provider errors still pause that UTC day. Normal successful and crashed attempts remain deduplicated. The 200-attempt ceiling, shared durable counter, lease and per-run bound remain in force.
+
+Added sanitized JSON health logs, three metric filters and three additional alarms: immediate provider pause, three consecutive hourly provider failures, and three hourly periods without useful writes or healthy idle status (missing reports breach). Budget exhaustion and empty queues are healthy idle states. Existing Lambda-error and failure-queue alarms remain. All five alarms target the optional `NotificationEmail` SNS subscription requested by the user; subscription confirmation is required. IAM deployment permissions were extended only for the app's named SNS topic, with policy validation passing; the Lambda runtime boundary is unchanged. See AWS_SETUP.md for alert thresholds and operations.
+
+Offline validation: 43 tests pass, including same-day recovery, repeated-failure budget limits, cooldown gating, 401/403/429 pauses, preservation of cached observations, atomic retry updates and healthy-idle monitoring. TypeScript, bundle checks and SAM lint pass. Deployed zero-request smoke checks returned `daily_budget_exhausted`; today's counter was verified at 200 without a provider block. Recent RUN items confirm the hourly schedule has fired. CloudWatch's JSON filter matches the final standalone health log; the requested email subscription is confirmed and all five alarm actions point to its topic. CloudFormation is `UPDATE_COMPLETE` and Scheduler remains `ENABLED`. Actual provider fault recovery was tested offline, not by forcing production outages.
 
 ## October 19: serverless and cache policy update
 
-The user selected AWS serverless so collection runs without opening the editor or keeping a PC awake. A first deployable slice now includes an hourly EventBridge Scheduler profile worker, Lambda, DynamoDB persistence/atomic budgets/leases, Secrets Manager access, failure queue and alarms. The schedule defaults disabled and nothing is deployed yet. See [AWS_SETUP.md](AWS_SETUP.md) for setup, safe local-cache migration, activation, limitations and the remaining cloud price/summary work. AWS CLI 2.38.1 and SAM CLI 1.169.0 are installed, and SAM lint validation passed. Browser sign-in succeeded for profile `stock-tracker-9000` as root; configure a separate deployment identity before deployment.
+The user selected AWS serverless so collection runs without opening the editor or keeping a PC awake. Stack `stock-tracker-9000` is deployed in `ca-central-1` with an hourly EventBridge Scheduler profile worker, Lambda, DynamoDB persistence/atomic budgets/leases, Secrets Manager access, failure queue and alarms. CloudFormation reports `UPDATE_COMPLETE` and the schedule is `ENABLED`. AWS CLI 2.38.1 and SAM CLI 1.169.0 are installed. Deployments use verified IAM profile `stock-tracker-deployer`; root was used only for IAM bootstrap/policy maintenance and read-only diagnostics. See [AWS_SETUP.md](AWS_SETUP.md) for operation and remaining cloud price/summary work.
 
-This supersedes the earlier seven-day hard profile expiry: queue proactive refresh at 90 days in the cloud worker; allow reuse under 180 days and retain older observations. Local ranking uses the same 180-day reuse limit, records profile observation dates, and still returns incomplete when necessary observations cannot be obtained. These are initial engineering settings; market caps near a filter cutoff may change sooner. Local and cloud counters are separate, so stop local provider jobs when cloud collection is enabled and account for activation-day usage. No provider calls or AWS deployment were made while implementing this slice.
+This supersedes the earlier seven-day hard profile expiry: queue proactive refresh at 90 days in the cloud worker; allow reuse under 180 days and retain older observations. Local ranking uses the same 180-day reuse limit, records profile observation dates, and still returns incomplete when necessary observations cannot be obtained. These are initial engineering settings; market caps near a filter cutoff may change sooner. Migration copied 126 profiles and carried today's 25 local profile attempts into the cloud budget, guarded against double import. The deployed smoke test made 25 further attempts and saved 19 profiles; the durable daily counter was verified at 50. Stop local provider scripts now that cloud collection is active. External requests remain untracked.
 
-The next milestone is deploying automatic profile collection, then adding hosted price ingestion and usable summaries, rather than repeating small manual ranking diagnostics.
+The later October 20 update above completes hosted daily prices and saved summaries. Neither stage requires daily editor visits or manual diagnostics.
+
+IAM bootstrap created `stock-tracker-deployer`, app-scoped managed deployment permissions and the `stock-tracker-9000-runtime-boundary` policy. The user set their password and stored the provider secret directly in AWS. No access keys were created, and no secret values were read into tool output/model context. IAM Access Analyzer checks and SAM lint passed. Both generated roles use the runtime boundary. Because the regional Lambda concurrency quota is 10, reserved concurrency is optional and disabled; the 11-minute lease and atomic budget safeguards remain active. See AWS_SETUP.md for stack/region/secret-name constraints and IAM console metadata permissions.
 
 ## Latest provider decision
 
@@ -42,6 +66,7 @@ The original Copilot product discussion and implementation plan were reviewed wi
 | Apple membership | Avoid a paid Apple Developer account by using Web Push. No TestFlight required for this approach. |
 | Data vendors | Alpaca for US assets/prices; FMP Free individual profiles for market cap/classification and FMP industry data. |
 | Freshness | End-of-day data is acceptable for the initial version. Live data remains a future preference if affordable. |
+| Initial saved-summary settings | $10B minimum cap and five gainers/five losers, selected October 20. |
 | Budget | Ideally around $20/month maximum; minimize costs. User would consider more if live data warrants it. Currency and whether this includes all infrastructure costs were not specified. |
 | Initial stock coverage | Supported US individual stocks with Alpaca price coverage and usable FMP profiles. |
 | Future coverage | Configurable US, Canadian, or combined coverage, including ETFs once supported. |
@@ -114,7 +139,7 @@ FMP pricing changed or differed between fetched pages during the discussion. Do 
 
 October 19 diagnostic: reran cached September 18/21 prices with the same test settings ($10B minimum cap, five per direction), capped at 25 new FMP requests. All 25 returned usable profiles and were cached; none qualified (below cap, non-US domicile, or fund/ETF). No fresh-cache hits were available for those candidates. The next candidate, NUAI, hit the local run limit, so the result was `incomplete` / `budget_exhausted`, with no winners and no loser pass. This was not vendor quota exhaustion. No Alpaca calls or notifications were made. `data/ranking-report.json` contains the latest report; `data/profile-enrichment-report.json` remains the historical September background-fill report. A subsequent bounded ranking run can reuse these refreshed profiles. Profiles describe current metadata, not historical market caps for the September prices.
 
-Current approach: Alpaca asset list → split-adjusted SIP daily bars → calculate period returns → exclude explicitly described warrants/rights → inspect/cache FMP profiles in return order → apply market-cap, company/fund and industry criteria → save a summary only if the ranking completes. The paid FMP screener is not used. The older FMP endpoint table below is historical context for the initial provider evaluation.
+Strict diagnostic approach (retained locally): Alpaca asset list → split-adjusted SIP daily bars → calculate period returns → exclude explicitly described warrants/rights → inspect/cache FMP profiles in return order → apply market-cap, company/fund and industry criteria → save a summary only if the ranking completes. The paid FMP screener is not used. The older FMP endpoint table below is historical context for the initial provider evaluation.
 
 The first cached ranking diagnostic used a $10B threshold and five results per direction (test settings). It made 50 new FMP requests across two attempts, cached 49 successful profiles, and stopped during the gainers pass before reaching qualifying results or checking losers. After excluding 602 explicitly described warrants/rights, 12,642 priced candidates remained. The per-run request limit triggered the expected incomplete result; this was not vendor quota exhaustion. See `data/ranking-report.json` and [ALPACA_SETUP.md](ALPACA_SETUP.md). Continue building on the cache instead of downloading Alpaca prices again for this interval.
 
@@ -233,15 +258,15 @@ The dependency-free Node diagnostic in `scripts/fmp-probe.mjs` implements backen
 
 ## State at handoff and next steps
 
-The repository includes local diagnostics plus a deployable scheduled AWS profile worker. No resources are deployed, and cloud price jobs, PWA/API, immutable notification snapshots and Web Push are not implemented. All 29 offline tests pass, including the final next-UTC-day retry adjustment. TypeScript, bundle building/loading, template safeguard checks, Git diff whitespace checks and SAM lint validation also pass. Commands: `npm test`, `npm run typecheck`, `npm run cloud:build`, `npm run cloud:validate`, `sam validate --lint --template-file template.yaml --region ca-central-1`. A deployed smoke test remains required.
+The repository includes local diagnostics and an active AWS worker for profiles, daily prices and immutable stock-summary previews. PWA/API, industry summaries, longer periods, notification scheduling and Web Push remain unimplemented. All 58 offline tests, TypeScript, bundle validation and SAM lint pass. Live collection, durable snapshots/latest pointer and zero-provider-call reruns were verified. See DAILY_SUMMARIES.md and AWS_SETUP.md.
 
 Next session:
 
 1. Read this handoff and AGENTS.md. Preserve the accepted PWA/Alpaca/FMP direction and latest user corrections.
-2. Follow AWS_SETUP.md to configure/deploy the disabled worker, migrate existing profiles, then enable collection with the correct activation-day budget. Stop local provider commands once cloud jobs are active. Confirm the market-cap threshold and country/listing interpretation before product defaults are finalized.
-3. Implement frequency-aware period selection using trading sessions; confirm industry methodology and request budget. Manual September 18/21 dates were only a daily coverage test.
-4. Build hosted dated price ingestion and summaries on the selected AWS backend; resolve period/calculation details and frontend hosting configuration.
-5. Scaffold the TypeScript PWA/backend, preferences and alert storage, then implement stock and industry summaries.
+2. Observe cloud profile/price progress without local provider calls. Build the PWA/API to display saved summaries and coverage while the cache grows. Country qualification currently means US domicile; confirm any broader listing interpretation before changing it.
+3. Extend calendar-based daily periods to weekly/biweekly/monthly; confirm industry methodology and request budget. The old September diagnostics remain historical.
+4. Configure frontend hosting and personal authentication, then add preferences/settings storage and summary retrieval endpoints.
+5. Implement industry summaries and saved alert eligibility rules; do not send notifications for partial-coverage previews by default.
 6. Add shared scheduling, the two Web Push notification types, and links to saved results. Validate on the user's iPhone.
 7. Add polish/history and, later, ETF/Canadian/live data and AI as supported and desired.
 

@@ -8,7 +8,7 @@ const booleanOrNull = (value: unknown): boolean | null => typeof value === 'bool
 export type ProfileResult =
   | { status: 'available'; profile: CompanyProfile }
   | { status: 'budget_exhausted' }
-  | { status: 'unavailable'; reason?: 'missing_key' | 'invalid_symbol' | 'access_denied' | 'unauthorized' | 'forbidden' | 'rate_limited' | 'http_error' | 'api_error_payload' | 'invalid_payload' | 'request_failed' };
+  | { status: 'unavailable'; reason?: 'missing_key' | 'invalid_symbol' | 'access_denied' | 'unauthorized' | 'forbidden' | 'rate_limited' | 'server_error' | 'http_error' | 'api_error_payload' | 'invalid_payload' | 'request_failed' };
 
 export function profileIsFresh(profile: CompanyProfile | null, now = new Date()): boolean {
   return profileIsUsable(profile, now);
@@ -51,7 +51,8 @@ export async function fetchProfile(symbol: string, key: string, fetchImpl: typeo
       await response.body?.cancel();
       return { status: 'unavailable', reason: response.status === 401 ? 'unauthorized'
         : response.status === 403 ? 'forbidden' : response.status === 402 ? 'access_denied'
-        : response.status === 429 ? 'rate_limited' : 'http_error' };
+        : response.status === 429 ? 'rate_limited'
+        : response.status >= 500 || response.status === 408 ? 'server_error' : 'http_error' };
     }
     const payload: unknown = await response.json();
     if (!Array.isArray(payload)) return { status: 'unavailable', reason: 'api_error_payload' };

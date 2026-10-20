@@ -13,6 +13,9 @@ async function main() {
   let cache: CacheDb | undefined;
   try {
     cache = await CacheDb.open(fileURLToPath(new URL('../../data/stock-cache.sqlite', import.meta.url)));
+    const day = new Date().toISOString().slice(0, 10);
+    const localAttempts = cache.getFmpAttempts(day);
+    await store.importLocalBudget(day, localAttempts);
     const existing = new Map((await store.entries()).map(entry => [entry.symbol, entry]));
     let copied = 0;
     for (const asset of cache.getAssets()) {
@@ -25,8 +28,8 @@ async function main() {
     }
     // Do not import the old asset list as a current observation; cloud fetches a new one.
     console.log(JSON.stringify({ copiedProfiles: copied, providerRequests: 0,
-      localProfileAttemptsToday: cache.getFmpAttempts(new Date().toISOString().slice(0, 10)),
-      note: 'Local request counters are separate. Allow for local/external usage before enabling the cloud schedule.' }));
+      localProfileAttemptsToday: localAttempts,
+      note: 'Today\'s locally tracked attempts were carried into the cloud budget without double counting on repeat imports. Stop local provider jobs after migration; external usage remains untracked.' }));
   } finally { cache?.close(); await store.release(owner); }
 }
 main().catch(() => {
